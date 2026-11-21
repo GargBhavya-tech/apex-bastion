@@ -250,14 +250,14 @@ UPGRADE_PRIORITY = [
     "gun_rate", "servos", "gun_mag", "laser_charge", "lightning_efficiency", "lightning_range",
     "capacitor", "reactor", "sensors", "jets", "gun_velocity",
 ]
-P = dict(want_l=22.0, want_g=40.0, want_lz=55.0, weak=0.35, amp=0.9, flip_lo=0.5, flip_hi=1.3, hold_hp=0.6, cube_r=30.0, cube_w=1.6, multi_n=99, multi_hp=0.7, adv_d=70.0, cover_camp=1, drop_r=120.0, drop_hp=0.6, late_pre=25.0, snd_avoid=1, avoid_s=3.0, tri=1, tri_far=58.0, laser_aim=1, engage_r=999.0, dmg_window=6.0, farm_until=999.0, camp=0.5, dodge_t=0.9, strafe_keep=0.7, v5=1, v5_open=0, v5_pos=0, v5_hide=0, v5_fight=0, corner_d=35.0, opp_d=60.0, opp_hp=0.6, opp_ratio=1.5, open_s=40.0, camp_late=0.3, loot_r=160.0, cube_roam=90.0)
+P = dict(want_l=22.0, want_g=40.0, want_lz=55.0, weak=0.35, amp=0.9, flip_lo=0.5, flip_hi=1.3, hold_hp=0.6, cube_r=30.0, cube_w=1.6, multi_n=99, multi_hp=0.7, adv_d=70.0, cover_camp=1, drop_r=120.0, drop_hp=0.6, late_pre=25.0, snd_avoid=1, avoid_s=3.0, tri=1, tri_far=58.0, laser_aim=1, engage_r=999.0, dmg_window=6.0, farm_until=999.0, camp=0.5, dodge_t=0.9, strafe_keep=0.7, v5=1, snipe_d=0.0, v5_open=0, v5_pos=0, v5_hide=0, v5_fight=0, corner_d=35.0, opp_d=60.0, opp_hp=0.6, opp_ratio=1.5, open_s=40.0, camp_late=0.3, loot_r=160.0, cube_roam=90.0)
 try:
     _ENV = json.loads(os.environ.get("BOT_PARAMS", "{}"))
 except Exception:
     _ENV = {}
 P.update(_ENV)
 # v5 "hide and survive" defaults: applied unless BOT_PARAMS sets v5=0; anything set explicitly in BOT_PARAMS wins.
-V5 = dict(v5_open=0, loot_r=160.0, farm_until=999.0, v5_pos=1, v5_hide=1, v5_fight=0, weak=0.35, adv_d=70.0, cube_w=3.5, cube_r=60.0, cube_roam=200.0)
+V5 = dict(v5_open=0, loot_r=160.0, farm_until=999.0, v5_pos=1, v5_hide=1, v5_fight=0, weak=0.35, adv_d=70.0, cube_w=1.6, cube_r=30.0, cube_roam=90.0, snipe_d=150.0)
 if _ENV.get("v5", 1):
     for _k, _v in V5.items():
         if _k not in _ENV:
@@ -273,7 +273,7 @@ def wscore(kind):
 
 
 class Bot:
-    name = "survivor-v7"
+    name = "survivor-v9"
 
     def __init__(self, hello):
         cfg = hello["config"]
@@ -867,6 +867,8 @@ class Bot:
                     want = P["want_l"]                   # lightning shorts lasers: close in
                 if "mortar" in ew and has_laser:
                     want = max(want, 70.0)               # laser outranges and cooks off mortars
+            if P["snipe_d"] and tgt_is_enemy:
+                want = max(want, P["snipe_d"])      # v9: fight from long range, outside an idle bot's reach
             n_close = sum(1 for m_ in enemies if hypot(m_["pos"][0] - x, m_["pos"][1] - y) < 70)
             outnumbered = tgt_is_enemy and n_close >= P["multi_n"] and hpf < P["multi_hp"]
             weak = outnumbered or tgt_is_enemy and hpf < P["weak"] and (len(enemies) >= 2 or tgt.get("hp", 700) / max(1, tgt.get("max_hp", 1400)) > hpf)
