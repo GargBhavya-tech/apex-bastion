@@ -250,16 +250,30 @@ UPGRADE_PRIORITY = [
     "gun_rate", "servos", "gun_mag", "laser_charge", "lightning_efficiency", "lightning_range",
     "capacitor", "reactor", "sensors", "jets", "gun_velocity",
 ]
-P = dict(want_l=22.0, want_g=40.0, want_lz=55.0, weak=0.35, amp=0.9, flip_lo=0.5, flip_hi=1.3, hold_hp=0.6, cube_r=30.0, cube_w=1.6, multi_n=99, multi_hp=0.7, adv_d=70.0, cover_camp=1, drop_r=120.0, drop_hp=0.6, late_pre=25.0, snd_avoid=1, avoid_s=3.0, tri=1, tri_far=58.0, laser_aim=1, engage_r=999.0, dmg_window=6.0, farm_until=999.0, camp=0.5, dodge_t=0.9, strafe_keep=0.7)
+P = dict(want_l=22.0, want_g=40.0, want_lz=55.0, weak=0.35, amp=0.9, flip_lo=0.5, flip_hi=1.3, hold_hp=0.6, cube_r=30.0, cube_w=1.6, multi_n=99, multi_hp=0.7, adv_d=70.0, cover_camp=1, drop_r=120.0, drop_hp=0.6, late_pre=25.0, snd_avoid=1, avoid_s=3.0, tri=1, tri_far=58.0, laser_aim=1, engage_r=999.0, dmg_window=6.0, farm_until=999.0, camp=0.5, dodge_t=0.9, strafe_keep=0.7, v5=1, v5_open=0, loot_r=160.0, cube_roam=90.0)
 try:
-    P.update(json.loads(os.environ.get("BOT_PARAMS", "{}")))
+    _ENV = json.loads(os.environ.get("BOT_PARAMS", "{}"))
 except Exception:
-    pass
+    _ENV = {}
+P.update(_ENV)
+# v5 "hide and survive" defaults: applied unless BOT_PARAMS sets v5=0; anything set explicitly in BOT_PARAMS wins.
+V5 = dict(v5_open=1, loot_r=60.0, farm_until=0.0)
+if _ENV.get("v5", 1):
+    for _k, _v in V5.items():
+        if _k not in _ENV:
+            P[_k] = _v
 WEAPON_SCORE = {"lightning": 3.0, "laser": 2.0, "mortar": 0.0, "gun": 1.0}
 
 
+def wscore(kind):
+    """Loot preference. v5 opening prefers the laser (hitscan, outranges mortar), then lightning."""
+    if P["v5_open"]:
+        return {"laser": 3.0, "lightning": 2.5}.get(kind, 0.0)
+    return WEAPON_SCORE.get(kind, 0)
+
+
 class Bot:
-    name = "survivor-v4"
+    name = "survivor-v5"
 
     def __init__(self, hello):
         cfg = hello["config"]
@@ -764,10 +778,12 @@ class Bot:
             if self.blocked_id(i, t):
                 continue
             kd = p["kind"]
-            sc_new = WEAPON_SCORE.get(kd, 0)
+            sc_new = wscore(kd)
             if sc_new <= 0 or kd in kinds:
                 continue
-            cur = WEAPON_SCORE.get(kinds[1], 0) if kinds[1] else 0
+            if P["v5_open"] and kinds[1] is not None:
+                continue  # opening: one good weapon only, no swapping
+            cur = wscore(kinds[1]) if kinds[1] else 0
             if len(kinds) > 1 and kinds[1] is not None and sc_new <= cur:
                 continue
             dd = hypot(p["pos"][0] - x, p["pos"][1] - y)
@@ -958,15 +974,17 @@ class Bot:
                             if self.blocked_id(i, t):
                                 continue
                             kd = p["kind"]
-                            scn = WEAPON_SCORE.get(kd, 0)
+                            scn = wscore(kd)
                             if scn <= 0 or kd in kinds:
                                 continue
-                            cur = WEAPON_SCORE.get(kinds[1], 0) if len(kinds) > 1 and kinds[1] else 0
+                            if P["v5_open"] and len(kinds) > 1 and kinds[1] is not None:
+                                continue
+                            cur = wscore(kinds[1]) if len(kinds) > 1 and kinds[1] else 0
                             if scn <= cur:
                                 continue
                             pp = p["pos"]
                             dd = hypot(pp[0] - x, pp[1] - y)
-                            if dd > 160 or not in_safe(pp[0], pp[1], 5):
+                            if dd > P["loot_r"] or not in_safe(pp[0], pp[1], 5):
                                 continue
                             if pp[2] - (w.ground(pp[0], pp[1]) if w else 0) > 4:
                                 continue
@@ -987,7 +1005,7 @@ class Bot:
                             if self.blocked_id(i, t):
                                 continue
                             dd = hypot(p[0] - x, p[1] - y)
-                            if dd < 90 and in_safe(p[0], p[1], 5):
+                            if dd < P["cube_roam"] and in_safe(p[0], p[1], 5):
                                 cands.append((dd, i, p))
                         if cands:
                             cands.sort()
