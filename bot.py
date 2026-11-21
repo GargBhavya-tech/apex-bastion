@@ -250,19 +250,19 @@ UPGRADE_PRIORITY = [
     "gun_rate", "servos", "gun_mag", "laser_charge", "lightning_efficiency", "lightning_range",
     "capacitor", "reactor", "sensors", "jets", "gun_velocity",
 ]
-P = dict(want_l=22.0, want_g=28.0, want_lz=38.0, weak=0.35, amp=0.9, flip_lo=0.5, flip_hi=1.3, hold_hp=0.6, cube_r=30.0, cube_w=1.6, multi_n=99, multi_hp=0.7, adv_d=70.0, cover_camp=1, drop_r=120.0, drop_hp=0.6, late_pre=25.0, snd_avoid=1, avoid_s=3.0, tri=1, tri_far=58.0, laser_aim=1, engage_r=999.0, dmg_window=6.0, farm_until=999.0, camp=0.5, dodge_t=0.9, strafe_keep=0.7, v5=1, snipe_d=0.0, v5_open=0, v5_pos=0, v5_hide=0, v5_fight=0, corner_d=35.0, opp_d=60.0, opp_hp=0.6, opp_ratio=1.5, open_s=40.0, camp_late=0.3, loot_r=160.0, cube_roam=90.0)
+P = dict(want_l=28.0, want_g=80.0, want_lz=125.0, weak=0.35, amp=0.9, flip_lo=0.5, flip_hi=1.3, hold_hp=0.6, cube_r=30.0, cube_w=1.6, multi_n=99, multi_hp=0.7, adv_d=70.0, cover_camp=1, drop_r=120.0, drop_hp=0.6, late_pre=25.0, snd_avoid=1, avoid_s=3.0, tri=1, tri_far=58.0, laser_aim=1, engage_r=999.0, dmg_window=6.0, farm_until=999.0, camp=0.5, dodge_t=0.9, strafe_keep=0.7, v5=1, snipe_d=0.0, v5_open=0, v5_pos=0, v5_hide=0, v5_fight=0, corner_d=35.0, opp_d=60.0, opp_hp=0.6, opp_ratio=1.5, open_s=40.0, camp_late=0.3, loot_r=160.0, cube_roam=90.0)
 try:
     _ENV = json.loads(os.environ.get("BOT_PARAMS", "{}"))
 except Exception:
     _ENV = {}
 P.update(_ENV)
 # v5 "hide and survive" defaults: applied unless BOT_PARAMS sets v5=0; anything set explicitly in BOT_PARAMS wins.
-V5 = dict(v5_open=0, loot_r=160.0, farm_until=999.0, v5_pos=1, v5_hide=1, v5_fight=0, weak=0.35, adv_d=70.0, cube_w=1.6, cube_r=30.0, cube_roam=90.0, snipe_d=0.0)
+V5 = dict(v5_open=0, loot_r=150.0, farm_until=999.0, v5_pos=1, v5_hide=1, v5_fight=0, weak=0.35, adv_d=70.0, cube_w=1.6, cube_r=30.0, cube_roam=90.0, snipe_d=0.0)
 if _ENV.get("v5", 1):
     for _k, _v in V5.items():
         if _k not in _ENV:
             P[_k] = _v
-WEAPON_SCORE = {"lightning": 3.0, "laser": 2.0, "mortar": 0.0, "gun": 1.0}
+WEAPON_SCORE = {"lightning": 2.0, "laser": 3.0, "mortar": 0.0, "gun": 1.0}
 
 
 def wscore(kind):
@@ -273,7 +273,7 @@ def wscore(kind):
 
 
 class Bot:
-    name = "survivor-v10"
+    name = "survivor-v12"
 
     def __init__(self, hello):
         cfg = hello["config"]
@@ -396,7 +396,7 @@ class Bot:
         if "lightning" in held:
             base.update(lightning_chain=7.8, lightning_efficiency=5.5, lightning_range=5.0)
         if "laser" in held:
-            base.update(laser_damage=7.8, laser_charge=6.0, laser_pierce=3.0)
+            base.update(laser_damage=8.9, laser_charge=8.5, laser_pierce=3.0)
         if "mortar" in held:
             base.update(mortar_splash=4.0, mortar_reload=4.0, mortar_velocity=3.0)
         best, bi = -1e9, 0
@@ -895,7 +895,16 @@ class Bot:
                     full = st["charge"]
                     ch = wk.get("charge", 0.0)
                     if tgt_vis and d < st["range"] * 0.9 and (d > 18 or ch > 0):
-                        if ch > 0:
+                        lethal = False
+                        if 0 < ch < full - 0.05 and tgt_is_enemy and ch >= st.get("min_charge", 0.15):
+                            mfrac = st.get("min_frac", 0.35)
+                            ld = st["damage"] * (mfrac + (1 - mfrac) * ch / full) * (1 + 0.04 * min(me.get("cubes", 0), 10))
+                            if "mortar" in tgt.get("weapons", []):
+                                ld *= 1 + st.get("cookoff", 0.6)
+                            lethal = ld * 0.8 >= tgt.get("hp", 1e9) and yerr_l < tol_g and perr_l < tol_gp
+                        if lethal:
+                            fire[si] = False   # release now: the partial charge already kills
+                        elif ch > 0:
                             if ch >= full - 0.05 and yerr_l < tol_g and perr_l < tol_gp:
                                 fire[si] = False
                             else:
