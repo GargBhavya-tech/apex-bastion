@@ -250,7 +250,7 @@ UPGRADE_PRIORITY = [
     "gun_rate", "servos", "gun_mag", "laser_charge", "lightning_efficiency", "lightning_range",
     "capacitor", "reactor", "sensors", "jets", "gun_velocity",
 ]
-P = dict(want_l=22.0, want_g=40.0, want_lz=55.0, weak=0.35, amp=0.9, flip_lo=0.5, flip_hi=1.3, hold_hp=0.6, cube_r=30.0, cube_w=1.6, multi_n=99, multi_hp=0.7, adv_d=70.0, tri=1, tri_far=58.0, laser_aim=1, engage_r=999.0, dmg_window=6.0, farm_until=999.0, camp=0.5, dodge_t=0.9, strafe_keep=0.7)
+P = dict(want_l=22.0, want_g=40.0, want_lz=55.0, weak=0.35, amp=0.9, flip_lo=0.5, flip_hi=1.3, hold_hp=0.6, cube_r=30.0, cube_w=1.6, multi_n=99, multi_hp=0.7, adv_d=70.0, snd_avoid=1, avoid_s=3.0, tri=1, tri_far=58.0, laser_aim=1, engage_r=999.0, dmg_window=6.0, farm_until=999.0, camp=0.5, dodge_t=0.9, strafe_keep=0.7)
 try:
     P.update(json.loads(os.environ.get("BOT_PARAMS", "{}")))
 except Exception:
@@ -274,6 +274,7 @@ class Bot:
             except Exception as e:  # map is an optimisation; play without it
                 mf.log("map load failed:", d, repr(e))
         self.camp_ang = self.rng.uniform(-PI, PI)
+        self.snd_fight = None   # (bearing, t, dist) of the latest gunfire/explosion
         self.tel_on = os.environ.get("BOT_TELEMETRY", "1") == "1"
         self.tel_dmg = []          # last 10 damaged events
         self.tel_dt = []           # decision times (ms), capped
@@ -425,9 +426,15 @@ class Bot:
             self.cr[c["id"]] = c["pos"]
         for i in [i for i, p in self.pk.items() if i not in vis_pk and hypot(p["pos"][0] - x, p["pos"][1] - y) < 28]:
             del self.pk[i]
-        # sounds -> alert
+        # sounds -> alert (face it) and fight-avoidance memory
         for s in obs["sounds"]:
-            if s["kind"] in ("gun", "laser", "lightning", "mortar", "laser_charge", "explosion") and s["dist"] != "far":
+            k = s["kind"]
+            if k in ("gun", "laser", "lightning", "mortar", "laser_charge", "explosion") and s["dist"] != "far":
+                if self.alert is None or t - self.alert[1] > 1.0:
+                    self.alert = (s["bearing"], t - s["age"])
+                self.snd_fight = (s["bearing"], t - s["age"], s["dist"])
+            elif k in ("step", "boost", "jet") and s["dist"] == "near":
+                # a mech walking up on us: turn to face it (steps are only audible within 40 m)
                 if self.alert is None or t - self.alert[1] > 1.0:
                     self.alert = (s["bearing"], t - s["age"])
         # stuck history
@@ -871,6 +878,14 @@ class Bot:
                 goal = (x + 40 * math.cos(a), y + 40 * math.sin(a))
                 boost = energy > 40
                 label = "flee"
+            # someone else's fight nearby and nobody is shooting at us: walk away from it
+            if (P["snd_avoid"] and goal is None and self.snd_fight and t - self.snd_fight[1] < P["avoid_s"]
+                    and t - self.last_dmg_t > 3.0 and hpf > 0.3):
+                a = self.snd_fight[0] + PI
+                ag = (x + 35 * math.cos(a), y + 35 * math.sin(a))
+                if in_safe(ag[0], ag[1], 12):
+                    goal = ag
+                    label = "avoid"
             if dodge is not None and tmin < 0.9:
                 move = dodge
                 goal = None
