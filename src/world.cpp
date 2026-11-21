@@ -601,16 +601,15 @@ void World::push_heap(HeapItem it) {
 
 HeapItem World::pop_heap() {
     HeapItem top = heap[0];
-    size_t last = heap.size() - 1;
-    heap[0] = heap[last];
+    heap[0] = heap.back();
     heap.pop_back();
-    last--;
+    const size_t n = heap.size();
     size_t i = 0;
     while (true) {
         size_t l = 2 * i + 1, r = 2 * i + 2;
         size_t m = i;
-        if (l <= last && heap[l].f < heap[m].f) m = l;
-        if (r <= last && heap[r].f < heap[m].f) m = r;
+        if (l < n && heap[l].f < heap[m].f) m = l;
+        if (r < n && heap[r].f < heap[m].f) m = r;
         if (m == i) break;
         std::swap(heap[m], heap[i]);
         i = m;
