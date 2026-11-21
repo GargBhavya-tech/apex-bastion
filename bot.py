@@ -273,7 +273,7 @@ def wscore(kind):
 
 
 class Bot:
-    name = "soloing-v14"
+    name = "soloing-v15"
 
     def __init__(self, hello):
         cfg = hello["config"]
@@ -1333,7 +1333,7 @@ class Bot:
 
 
 class Soloist(Bot):
-    name = "soloing-v14"
+    name = "soloing-v15"
     LAT = 0.075
 
     OPENING_P = dict(retreat_hp=0.38, recover_hp=0.8, gun_range=85.0, light_range=28.0, laser_range=85.0, engage_dist=60.0,
@@ -1354,7 +1354,7 @@ class Soloist(Bot):
                    "sensors", "jets", "laser_pierce"]
     W_RANK = {"lightning": 3, "laser": 2, "mortar": 1}
     # extra behaviours (each can be switched off via BOT_PARAMS {"extras": {...}})
-    EXTRAS = dict(safe=1, escape=1, hear=1, rear=25.0, drops=1, fight_drop_r=35.0)
+    EXTRAS = dict(safe=0, escape=0, hear=0, rear=0.0, drops=0, fight_drop_r=0.0)
 
     def __init__(self, hello):
         super().__init__(hello)
