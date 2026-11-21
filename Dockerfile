@@ -1,12 +1,9 @@
-FROM golang:1.26.1-bookworm@sha256:ab3d6955bbc813a0f3fdf220c1d817dd89c0b3f283777db8ece4a32fe7858edd AS build
+FROM gcc:14-bookworm AS build
 WORKDIR /src
-ENV CGO_ENABLED=0 GOOS=linux GOARCH=amd64
-COPY go.mod ./
-COPY mech ./mech
-COPY cmd/bot ./cmd/bot
-RUN go build -trimpath -ldflags="-s -w" -o /mechbot ./cmd/bot
+COPY src /src
+RUN g++ -O3 -std=c++20 -static -pthread -Wall -Wextra -I/src -o /mechbot /src/main.cpp /src/world.cpp /src/brain.cpp
 
 FROM scratch
-ENV HOME=/tmp TMPDIR=/tmp GOMAXPROCS=1
+ENV HOME=/tmp TMPDIR=/tmp
 COPY --from=build /mechbot /mechbot
 ENTRYPOINT ["/mechbot"]
