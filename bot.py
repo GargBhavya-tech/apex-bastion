@@ -250,14 +250,14 @@ UPGRADE_PRIORITY = [
     "gun_rate", "servos", "gun_mag", "laser_charge", "lightning_efficiency", "lightning_range",
     "capacitor", "reactor", "sensors", "jets", "gun_velocity",
 ]
-P = dict(want_l=22.0, want_g=40.0, want_lz=55.0, weak=0.35, amp=0.9, flip_lo=0.5, flip_hi=1.3, hold_hp=0.6, cube_r=30.0, cube_w=1.6, multi_n=99, multi_hp=0.7, adv_d=70.0, cover_camp=1, drop_r=120.0, drop_hp=0.6, late_pre=25.0, snd_avoid=1, avoid_s=3.0, tri=1, tri_far=58.0, laser_aim=1, engage_r=999.0, dmg_window=6.0, farm_until=999.0, camp=0.5, dodge_t=0.9, strafe_keep=0.7, v5=1, v5_open=0, v5_pos=0, v5_hide=0, open_s=40.0, camp_late=0.3, loot_r=160.0, cube_roam=90.0)
+P = dict(want_l=22.0, want_g=40.0, want_lz=55.0, weak=0.35, amp=0.9, flip_lo=0.5, flip_hi=1.3, hold_hp=0.6, cube_r=30.0, cube_w=1.6, multi_n=99, multi_hp=0.7, adv_d=70.0, cover_camp=1, drop_r=120.0, drop_hp=0.6, late_pre=25.0, snd_avoid=1, avoid_s=3.0, tri=1, tri_far=58.0, laser_aim=1, engage_r=999.0, dmg_window=6.0, farm_until=999.0, camp=0.5, dodge_t=0.9, strafe_keep=0.7, v5=1, v5_open=0, v5_pos=0, v5_hide=0, v5_fight=0, corner_d=35.0, opp_d=60.0, opp_hp=0.6, opp_ratio=1.5, open_s=40.0, camp_late=0.3, loot_r=160.0, cube_roam=90.0)
 try:
     _ENV = json.loads(os.environ.get("BOT_PARAMS", "{}"))
 except Exception:
     _ENV = {}
 P.update(_ENV)
 # v5 "hide and survive" defaults: applied unless BOT_PARAMS sets v5=0; anything set explicitly in BOT_PARAMS wins.
-V5 = dict(v5_open=1, loot_r=60.0, farm_until=0.0, v5_pos=1, v5_hide=1)
+V5 = dict(v5_open=1, loot_r=60.0, farm_until=0.0, v5_pos=1, v5_hide=1, v5_fight=1, weak=0.6, adv_d=0.0, cube_w=0.4, cube_r=20.0, cube_roam=25.0)
 if _ENV.get("v5", 1):
     for _k, _v in V5.items():
         if _k not in _ENV:
@@ -289,6 +289,7 @@ class Bot:
                 mf.log("map load failed:", d, repr(e))
         self.camp_ang = self.rng.uniform(-PI, PI)
         self.camp_cache = {}
+        self.fight_reason = ""
         self.snd_fight = None   # (bearing, t, dist) of the latest gunfire/explosion
         self.tel_on = os.environ.get("BOT_TELEMETRY", "1") == "1"
         self.tel_dmg = []          # last 10 damaged events
@@ -506,6 +507,26 @@ class Bot:
         self.camp_cache[key] = bp
         return bp
 
+    def fight_ok(self, m, d, hpm, hpf, me, enemies, mine, t, outside):
+        """v5: engage only when hurt, cornered, or when ALL of: target hurt/weaker, alone, matchup fine, close."""
+        if t - self.last_dmg_t < P["dmg_window"]:
+            return "hurt-by-someone"
+        if outside:
+            return None
+        if d < P["corner_d"]:
+            return "cornered"
+        if d > P["opp_d"] or len(enemies) > 1:
+            return None
+        ew = set(m.get("weapons", []))
+        against = ("lightning" in ew and "lightning" not in mine) or ("mortar" in ew and "lightning" in mine and "laser" not in mine)
+        if against:
+            return None
+        if hpm < P["opp_hp"]:
+            return "opp:target-hurt"
+        if me["hp"] > P["opp_ratio"] * m.get("hp", 1400):
+            return "opp:stronger"
+        return None
+
     def snap(self, p):
         w = self.world
         if w is None or getattr(w, "blk", None) is None:
@@ -604,7 +625,7 @@ class Bot:
         self.tel_last = dict(
             t=round(t, 1), hp=round(me["hp"]), max_hp=round(me["max_hp"]), en=round(me["energy"]),
             pos=[round(v) for v in me["pos"]], in_zone=me["in_zone"], cubes=me["cubes"], alive=obs["alive"],
-            loadout=[(w["kind"] if w else None) for w in me["weapons"]], vis=nvis, mode=self.last_label,
+            loadout=[(w["kind"] if w else None) for w in me["weapons"]], vis=nvis, mode=self.last_label, why=self.fight_reason,
             foes=[[m["id"], round(m["pos"][0] - me["pos"][0]), round(m["pos"][1] - me["pos"][1]), round(m.get("hp", 0)),
                    m.get("weapons", [])] for m in obs["mechs"] if m["kind"] == "mech"][:4],
         )
@@ -703,6 +724,11 @@ class Bot:
             hpm = m.get("hp", 700) / max(1.0, m.get("max_hp", 1400))
             if d > P["engage_r"] and t - self.last_dmg_t > P["dmg_window"]:
                 continue  # passive: ignore far enemies unless they are hurting us
+            if P["v5_fight"]:
+                why = self.fight_ok(m, d, hpm, hpf, me, enemies, kinds, t, outside)
+                if why is None:
+                    continue
+                self.fight_reason = why
             score = d * (0.6 + hpm) + (0 if vis else 60)
             if d > 230:
                 score += 200
