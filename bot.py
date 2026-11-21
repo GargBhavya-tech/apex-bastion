@@ -250,7 +250,7 @@ UPGRADE_PRIORITY = [
     "gun_rate", "servos", "gun_mag", "laser_charge", "lightning_efficiency", "lightning_range",
     "capacitor", "reactor", "sensors", "jets", "gun_velocity",
 ]
-P = dict(want_l=22.0, want_g=40.0, want_lz=55.0, weak=0.35, amp=0.9, flip_lo=0.5, flip_hi=1.3, hold_hp=0.6, cube_r=30.0, cube_w=1.6, multi_n=99, multi_hp=0.7, adv_d=70.0, engage_r=999.0, dmg_window=6.0, farm_until=999.0, camp=0.5, dodge_t=0.9, strafe_keep=0.7)
+P = dict(want_l=22.0, want_g=40.0, want_lz=55.0, weak=0.35, amp=0.9, flip_lo=0.5, flip_hi=1.3, hold_hp=0.6, cube_r=30.0, cube_w=1.6, multi_n=99, multi_hp=0.7, adv_d=70.0, tri=1, tri_far=58.0, laser_aim=1, engage_r=999.0, dmg_window=6.0, farm_until=999.0, camp=0.5, dodge_t=0.9, strafe_keep=0.7)
 try:
     P.update(json.loads(os.environ.get("BOT_PARAMS", "{}")))
 except Exception:
@@ -728,14 +728,32 @@ class Bot:
             aim = [yaw, pitch]
             yerr = abs(wrap(yaw - me["aim"][0]))
             perr = abs(pitch - me["aim"][1])
+            yerr_l, perr_l = yerr, perr
             has_lightning = "lightning" in kinds
             has_laser = "laser" in kinds
+            # laser is hitscan: aim where the target will be when we release, not with bullet lead
+            lw = next((w_ for w_ in wl if w_ and w_["kind"] == "laser"), None)
+            if P["laser_aim"] and lw is not None and tgt_vis and d > 18 and (lw.get("charge", 0.0) > 0 or lw["cooldown"] <= 0.05):
+                t_rel = max(0.0, lw["stats"]["charge"] - lw.get("charge", 0.0)) + 0.1
+                lyaw, lpit = self.aim_angles(sx, sy, sz, tp[0] + tv[0] * t_rel, tp[1] + tv[1] * t_rel, tcz)
+                aim = [lyaw, lpit]
+                yerr_l = abs(wrap(lyaw - me["aim"][0]))
+                perr_l = abs(lpit - me["aim"][1])
+                yerr = abs(wrap(yaw - me["aim"][0]))  # gun still gated on its own solution
             if has_lightning and energy > 12:
                 want = P["want_l"]
             elif has_laser:
                 want = P["want_lz"]
             else:
                 want = P["want_g"]
+            if P["tri"] and tgt_is_enemy:
+                ew = set(tgt.get("weapons", []))
+                if "lightning" in ew and not has_lightning:
+                    want = max(want, P["tri_far"])      # stay outside its 45 m arc range
+                elif "laser" in ew and has_lightning and energy > 12:
+                    want = P["want_l"]                   # lightning shorts lasers: close in
+                if "mortar" in ew and has_laser:
+                    want = max(want, 70.0)               # laser outranges and cooks off mortars
             n_close = sum(1 for m_ in enemies if hypot(m_["pos"][0] - x, m_["pos"][1] - y) < 70)
             outnumbered = tgt_is_enemy and n_close >= P["multi_n"] and hpf < P["multi_hp"]
             weak = outnumbered or tgt_is_enemy and hpf < P["weak"] and (len(enemies) >= 2 or tgt.get("hp", 700) / max(1, tgt.get("max_hp", 1400)) > hpf)
@@ -763,7 +781,7 @@ class Bot:
                     ch = wk.get("charge", 0.0)
                     if tgt_vis and d < st["range"] * 0.9 and (d > 18 or ch > 0):
                         if ch > 0:
-                            if ch >= full - 0.05 and yerr < tol_g:
+                            if ch >= full - 0.05 and yerr_l < tol_g and perr_l < tol_gp:
                                 fire[si] = False
                             else:
                                 fire[si] = True
