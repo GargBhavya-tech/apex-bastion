@@ -250,7 +250,7 @@ UPGRADE_PRIORITY = [
     "gun_rate", "servos", "gun_mag", "laser_charge", "lightning_efficiency", "lightning_range",
     "capacitor", "reactor", "sensors", "jets", "gun_velocity",
 ]
-P = dict(want_l=22.0, want_g=40.0, want_lz=55.0, weak=0.35, amp=0.9, flip_lo=0.5, flip_hi=1.3, hold_hp=0.6, cube_r=30.0, cube_w=1.6, multi_n=99, multi_hp=0.7, adv_d=70.0, snd_avoid=1, avoid_s=3.0, tri=1, tri_far=58.0, laser_aim=1, engage_r=999.0, dmg_window=6.0, farm_until=999.0, camp=0.5, dodge_t=0.9, strafe_keep=0.7)
+P = dict(want_l=22.0, want_g=40.0, want_lz=55.0, weak=0.35, amp=0.9, flip_lo=0.5, flip_hi=1.3, hold_hp=0.6, cube_r=30.0, cube_w=1.6, multi_n=99, multi_hp=0.7, adv_d=70.0, cover_camp=1, drop_r=120.0, drop_hp=0.6, late_pre=25.0, snd_avoid=1, avoid_s=3.0, tri=1, tri_far=58.0, laser_aim=1, engage_r=999.0, dmg_window=6.0, farm_until=999.0, camp=0.5, dodge_t=0.9, strafe_keep=0.7)
 try:
     P.update(json.loads(os.environ.get("BOT_PARAMS", "{}")))
 except Exception:
@@ -274,6 +274,7 @@ class Bot:
             except Exception as e:  # map is an optimisation; play without it
                 mf.log("map load failed:", d, repr(e))
         self.camp_ang = self.rng.uniform(-PI, PI)
+        self.camp_cache = {}
         self.snd_fight = None   # (bearing, t, dist) of the latest gunfire/explosion
         self.tel_on = os.environ.get("BOT_TELEMETRY", "1") == "1"
         self.tel_dmg = []          # last 10 damaged events
@@ -343,7 +344,8 @@ class Bot:
         return dx, dy
 
     def safe_zone(self, zone, t):
-        if t >= zone["shrink_start"] - 10:
+        lead = 10 if zone["radius"] > 150 else P["late_pre"]
+        if t >= zone["shrink_start"] - lead:
             return zone["next_center"], zone["next_radius"]
         return zone["center"], zone["radius"]
 
@@ -451,6 +453,38 @@ class Bot:
             d = hypot(p[0] - x, p[1] - y)
             if d < best:
                 best, bp = d, p
+        return bp
+
+    def sheltered(self, base, zc, zr):
+        """Camp spot near `base` that has buildings on several sides (fewer open firing lanes). Cached."""
+        w = self.world
+        if w is None or getattr(w, "blk", None) is None:
+            return base
+        key = (round(zc[0] / 15), round(zc[1] / 15), round(zr / 15), round(base[0] / 15), round(base[1] / 15))
+        hit = self.camp_cache.get(key)
+        if hit is not None:
+            return hit
+        best, bp = -1, base
+        for r in (0.0, 15.0, 30.0, 45.0):
+            for k in range(1 if r == 0 else 10):
+                a = k * PI / 5
+                cx, cy = base[0] + r * math.cos(a), base[1] + r * math.sin(a)
+                if hypot(cx - zc[0], cy - zc[1]) > zr - 15 or w.blk[w.cell(cx, cy)[1] * w.gw + w.cell(cx, cy)[0]]:
+                    continue
+                gz = w.ground(cx, cy)
+                shelter = 0
+                for q in range(8):
+                    ca, sa = math.cos(q * PI / 4), math.sin(q * PI / 4)
+                    for dist in (5, 10, 15, 22):
+                        if w.roof(cx + ca * dist, cy + sa * dist) > gz + 6:
+                            shelter += 1
+                            break
+                sc_ = shelter - r * 0.02
+                if sc_ > best:
+                    best, bp = sc_, (cx, cy)
+        if len(self.camp_cache) > 200:
+            self.camp_cache.clear()
+        self.camp_cache[key] = bp
         return bp
 
     def snap(self, p):
@@ -626,6 +660,8 @@ class Bot:
         dzc = hypot(x - zc[0], y - zc[1])
         outside = dzc > zr - 12 or not me["in_zone"]
         camp = self.snap((zc[0] + P["camp"] * zr * math.cos(self.camp_ang), zc[1] + P["camp"] * zr * math.sin(self.camp_ang)))
+        if P["cover_camp"]:
+            camp = self.sheltered(camp, zc, zr)
 
         def in_safe(px, py, margin=10.0):
             return hypot(px - zc[0], py - zc[1]) < zr - margin
@@ -903,7 +939,7 @@ class Bot:
                     cand = None
                     for dr in obs["drops"]:
                         dd = hypot(dr["pos"][0] - x, dr["pos"][1] - y)
-                        if in_safe(dr["pos"][0], dr["pos"][1], 6) and dd < 220 and dr["lands_in"] <= dd / 11.0 + 6 and hpf > 0.2:
+                        if in_safe(dr["pos"][0], dr["pos"][1], 6) and dd < P["drop_r"] and dr["lands_in"] <= dd / 11.0 + 6 and hpf > P["drop_hp"]:
                             if dr.get("holder") not in (None, self.slot) and dd > 25:
                                 continue
                             if cand is None or dd < cand[0]:
