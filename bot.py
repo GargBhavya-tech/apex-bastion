@@ -250,14 +250,14 @@ UPGRADE_PRIORITY = [
     "gun_rate", "servos", "gun_mag", "laser_charge", "lightning_efficiency", "lightning_range",
     "capacitor", "reactor", "sensors", "jets", "gun_velocity",
 ]
-P = dict(want_l=28.0, want_g=80.0, want_lz=125.0, weak=0.35, amp=0.9, flip_lo=0.5, flip_hi=1.3, hold_hp=0.6, cube_r=30.0, cube_w=1.6, multi_n=99, multi_hp=0.7, adv_d=70.0, cover_camp=1, drop_r=120.0, drop_hp=0.6, late_pre=25.0, snd_avoid=1, avoid_s=3.0, tri=1, tri_far=58.0, laser_aim=1, engage_r=999.0, dmg_window=6.0, farm_until=999.0, camp=0.5, dodge_t=0.9, strafe_keep=0.7, v5=1, snipe_d=0.0, v5_open=0, v5_pos=0, v5_hide=0, v5_fight=0, corner_d=35.0, opp_d=60.0, opp_hp=0.6, opp_ratio=1.5, open_s=40.0, camp_late=0.3, loot_r=160.0, cube_roam=90.0)
+P = dict(want_l=28.0, want_g=80.0, want_lz=125.0, weak=0.35, amp=0.9, flip_lo=0.5, flip_hi=1.3, hold_hp=0.6, cube_r=30.0, cube_w=1.6, multi_n=99, multi_hp=0.7, adv_d=70.0, cover_camp=1, drop_r=120.0, drop_hp=0.6, late_pre=25.0, snd_avoid=1, avoid_s=3.0, tri=1, tri_far=58.0, laser_aim=1, engage_r=999.0, dmg_window=6.0, farm_until=999.0, camp=0.5, dodge_t=0.9, strafe_keep=0.7, v5=1, team=0, eng_d=60.0, max_t=240.0, open_t=20.0, snipe_d=0.0, v5_open=0, v5_pos=0, v5_hide=0, v5_fight=0, corner_d=35.0, opp_d=60.0, opp_hp=0.6, opp_ratio=1.5, open_s=40.0, camp_late=0.3, loot_r=160.0, cube_roam=90.0)
 try:
     _ENV = json.loads(os.environ.get("BOT_PARAMS", "{}"))
 except Exception:
     _ENV = {}
 P.update(_ENV)
 # v5 "hide and survive" defaults: applied unless BOT_PARAMS sets v5=0; anything set explicitly in BOT_PARAMS wins.
-V5 = dict(v5_open=0, loot_r=150.0, farm_until=999.0, v5_pos=1, v5_hide=1, v5_fight=0, weak=0.35, adv_d=70.0, cube_w=1.6, cube_r=30.0, cube_roam=90.0, snipe_d=0.0)
+V5 = dict(v5_open=0, loot_r=150.0, farm_until=999.0, v5_pos=1, v5_hide=1, v5_fight=0, weak=0.35, adv_d=70.0, cube_w=1.6, cube_r=30.0, cube_roam=90.0, snipe_d=0.0, team=1)
 if _ENV.get("v5", 1):
     for _k, _v in V5.items():
         if _k not in _ENV:
@@ -273,7 +273,7 @@ def wscore(kind):
 
 
 class Bot:
-    name = "survivor-v12"
+    name = "survivor-v13"
 
     def __init__(self, hello):
         cfg = hello["config"]
@@ -290,6 +290,11 @@ class Bot:
         self.camp_ang = self.rng.uniform(-PI, PI)
         self.camp_cache = {}
         self.fight_reason = ""
+        self.hit_by = {}
+        self.stick = (-1, -99.0)
+        self.lose_at = -99.0
+        self.t_sign = 1
+        self.t_sflip = 0.0
         self.snd_fight = None   # (bearing, t, dist) of the latest gunfire/explosion
         self.tel_on = os.environ.get("BOT_TELEMETRY", "1") == "1"
         self.tel_dmg = []          # last 10 damaged events
@@ -430,6 +435,8 @@ class Bot:
                 self.bad[e["id"]] = t + 4
             elif ty == "damaged":
                 self.last_dmg_t = t
+                if e.get("by") is not None:
+                    self.hit_by[e["by"]] = t
                 if e.get("bearing") is not None:
                     self.alert = (e["bearing"], t)
         vis_pk = set()
@@ -526,6 +533,94 @@ class Bot:
         if me["hp"] > P["opp_ratio"] * m.get("hp", 1400):
             return "opp:stronger"
         return None
+
+    def engage_ok(self, m, d, me, obs, t):
+        """Reactive engagement: fight what is close, what hurt us, what comes at us or aims at us; ignore the rest."""
+        x, y = me["pos"][0], me["pos"][1]
+        mid = m.get("id")
+        hit = t - self.hit_by.get(mid, -99.0)
+        hpm = m.get("hp", 700)
+        hmax = max(1.0, m.get("max_hp", 1400))
+        bearing = math.atan2(y - m["pos"][1], x - m["pos"][0])
+        aimed = abs(wrap(m.get("aim", [0.0, 0.0])[0] - bearing)) < 0.22
+        late = obs["zone"]["next_radius"] <= 70 or obs["alive"] <= 3
+        if t < P["open_t"]:      # cautious opening: only close, attackers, or a charged laser pointed at us
+            return (d < P["eng_d"] or hit < 4 or (aimed and m.get("charging") and d < 120)
+                    or (hpm < 350 and d < 120) or obs["alive"] <= 2)
+        if d < P["eng_d"] or hit < 6 or late:
+            return True
+        mv, sv = m.get("vel", [0, 0, 0]), me.get("vel", [0, 0, 0])
+        closing = -((mv[0] - sv[0]) * (m["pos"][0] - x) + (mv[1] - sv[1]) * (m["pos"][1] - y)) / max(d, 1.0)
+        if closing > 3 and d < 180:
+            return True
+        if hpm < 0.4 * hmax and d < 160:
+            return True
+        return aimed and d < 190
+
+    def fight_move(self, x, y, z, tgt, rp, want_los, enemies, zone, t, w):
+        """Pick one of 17 nearby spots: right range, line of sight to the target, out of sight of the others, inside the circle."""
+        tp = tgt["pos"]
+        sc = 1 + 0.05 * tgt.get("cubes", 0)
+        tcz = tp[2] + 4.5 * sc
+        bx, by = tp[0] - x, tp[1] - y
+        bd = hypot(bx, by) or 1e-9
+        ux, uy = bx / bd, by / bd
+        if t >= self.t_sflip:
+            if self.rng.random() < 0.6:
+                self.t_sign = -self.t_sign
+            self.t_sflip = t + 0.3 + self.rng.random() * 0.7
+        sx, sy = -uy * self.t_sign, ux * self.t_sign
+        others = sorted((e for e in enemies if e is not tgt and hypot(e["pos"][0] - x, e["pos"][1] - y) < 170),
+                        key=lambda e: hypot(e["pos"][0] - x, e["pos"][1] - y))[:3]
+        zc0, zr0 = zone["center"], zone["radius"]
+        nc, nr = zone["next_center"], zone["next_radius"]
+        soon = clamp(1 - (zone["shrink_start"] - t) / 25.0, 0.1, 1.0)
+        best, bm = -1e9, (0.0, 0.0)
+        blocked_side = False
+        mzh = 7.0
+        t0 = time.perf_counter()
+        for k in range(-1, 16):
+            if k >= 0:
+                a = k * math.pi / 8
+                dx, dy = math.cos(a), math.sin(a)
+                r = 6.0
+                cx, cy = x + dx * r, y + dy * r
+                if w is not None and not (w.free(cx, cy, z, 5.0) and w.line_free(x, y, cx, cy, z)):
+                    if dx * sx + dy * sy > 0.9:
+                        blocked_side = True
+                    continue
+            else:
+                dx = dy = r = 0.0
+                cx, cy = x, y
+            if k >= 0 and time.perf_counter() - t0 > 0.012:
+                break
+            d = hypot(tp[0] - cx, tp[1] - cy)
+            s_ = -1.1 * abs(d - rp) - r * 0.4
+            los = True if w is None else w.los(cx, cy, z + mzh, tp[0], tp[1], tcz)
+            if los:
+                s_ += 45 * want_los
+            if w is not None:
+                for e in others:
+                    if w.los(e["pos"][0], e["pos"][1], e["pos"][2] + 8.0, cx, cy, z + 5.0):
+                        s_ -= 30
+            dd = hypot(cx - zc0[0], cy - zc0[1]) - zr0
+            if dd > -5:
+                s_ -= 150 + 5 * (dd + 5)
+            dn = hypot(cx - nc[0], cy - nc[1]) - nr
+            if dn > -5:
+                s_ -= soon * (25 + 0.8 * (dn + 5))
+            if want_los > 0:
+                s_ += 9 * (dx * sx + dy * sy)
+            if k < 0:
+                s_ -= 8
+                if want_los < 0 and not los:
+                    s_ += 14
+            if s_ > best:
+                best, bm = s_, (dx, dy)
+        if blocked_side:
+            self.t_sign = -self.t_sign
+            self.t_sflip = t + 0.5
+        return bm
 
     def snap(self, p):
         w = self.world
@@ -715,6 +810,7 @@ class Bot:
         tgt_vis = False
         tgt_is_enemy = True
         best = 1e9
+        hid = None
         for m in enemies:
             p = m["pos"]
             d = hypot(p[0] - x, p[1] - y)
@@ -729,11 +825,32 @@ class Bot:
                 if why is None:
                     continue
                 self.fight_reason = why
-            score = d * (0.6 + hpm) + (0 if vis else 60)
-            if d > 230:
-                score += 200
+            if P["team"]:
+                if d > P["max_t"] or not self.engage_ok(m, d, me, obs, t):
+                    continue
+                if not vis:
+                    if hid is None or d < hid[1]:
+                        hid = (m, d)
+                    continue
+                score = d + 0.2 * m.get("hp", 700)
+                if hpm <= 0.3:
+                    score -= 100
+                if self.stick[0] == m.get("id") and t - self.stick[1] < 2.0:
+                    score -= 120
+                if t - self.hit_by.get(m.get("id"), -99.0) < 4:
+                    score -= 40
+                self.fight_reason = "team"
+            else:
+                score = d * (0.6 + hpm) + (0 if vis else 60)
+                if d > 230:
+                    score += 200
             if score < best:
                 best, tgt, tgt_vis = score, m, vis
+        if P["team"]:
+            if tgt is None and hid is not None:
+                tgt, tgt_vis = hid[0], False
+            if tgt is not None:
+                self.stick = (tgt.get("id"), t)
         if tgt is None and hpf > 0.5 and t < P["farm_until"]:
             for m in npcs:
                 p = m["pos"]
@@ -872,6 +989,21 @@ class Bot:
             n_close = sum(1 for m_ in enemies if hypot(m_["pos"][0] - x, m_["pos"][1] - y) < 70)
             outnumbered = tgt_is_enemy and n_close >= P["multi_n"] and hpf < P["multi_hp"]
             weak = outnumbered or tgt_is_enemy and hpf < P["weak"] and (len(enemies) >= 2 or tgt.get("hp", 700) / max(1, tgt.get("max_hp", 1400)) > hpf)
+            finishing = False
+            if P["team"] and tgt_is_enemy:
+                late_ = obs["zone"]["next_radius"] <= 70 or obs["alive"] <= 3
+                thp = tgt.get("hp", 700)
+                finishing = d < 120 and (thp < 200 or thp < me["hp"] * 0.5)
+                near = sum(1 for m_ in enemies if hypot(m_["pos"][0] - x, m_["pos"][1] - y) < 160)
+                tf = thp / max(1.0, tgt.get("max_hp", 1400))
+                losing = (near >= 2 and hpf < 0.55) or (near >= 3 and hpf < 0.8)
+                if hpf < 0.35 and tf > hpf + 0.1:
+                    losing = True
+                if tf < 0.25 and hpf > 0.2 and near <= 2:
+                    losing = False
+                if losing:
+                    self.lose_at = t
+                weak = (t - self.lose_at < 1.5) and not finishing and not late_
             tol = max(0.025, 0.7 * math.atan2(2.5, max(d, 5.0)))
             slew_y = stats.get("turn_rate", 4.0) * 0.05 * 0.9
             slew_p = stats.get("pitch_rate", 3.0) * 0.05 * 0.9
@@ -894,7 +1026,7 @@ class Bot:
                 elif kd == "laser":
                     full = st["charge"]
                     ch = wk.get("charge", 0.0)
-                    if tgt_vis and d < st["range"] * 0.9 and (d > 18 or ch > 0):
+                    if tgt_vis and d < st["range"] * (0.97 if P["team"] else 0.9) and (d > 18 or ch > 0):
                         lethal = False
                         if 0 < ch < full - 0.05 and tgt_is_enemy and ch >= st.get("min_charge", 0.15):
                             mfrac = st.get("min_frac", 0.35)
@@ -955,6 +1087,37 @@ class Bot:
                     cdx, cdy = cn[0] - x, cn[1] - y
                     cdn = hypot(cdx, cdy) or 1.0
                     move = (mx + P["cube_w"] * cdx / cdn, my + P["cube_w"] * cdy / cdn)
+            if P["team"] and tgt_is_enemy and not weak and w is not None:
+                th_ = tgt.get("weapons", [])
+                if "lightning" in kinds and energy > 12:
+                    rp = P["want_l"]
+                elif "laser" in kinds:
+                    rp = P["want_lz"]
+                else:
+                    rp = P["want_g"]
+                if "lightning" not in kinds and "lightning" in th_:
+                    rp = max(rp, 64.0)
+                if "mortar" in th_ and "lightning" not in kinds:
+                    rp = max(rp, 80.0)
+                crowd_ = sum(1 for m_ in enemies if hypot(m_["pos"][0] - x, m_["pos"][1] - y) < 150)
+                if (tgt.get("hp", 700) < 0.38 * max(1.0, tgt.get("max_hp", 1400)) and hpf > 0.42 and crowd_ <= 2):
+                    rp = 14.0
+                gun_ = wl[0] if wl and wl[0] and wl[0]["kind"] == "gun" else None
+                ready = ("laser" in kinds) or ("lightning" in kinds and energy >= 9)
+                if not ready and gun_ is not None:
+                    ready = gun_.get("ammo", 1) > 0 and gun_.get("reload", 0) <= 0.25 and d <= gun_["stats"]["range"] - 10
+                tmv = self.fight_move(x, y, z, tgt, rp, 1.0 if ready else -1.0, enemies, obs["zone"], t, w)
+                move, goal = tmv, None
+                label = "fight"
+                # cube detour in a fight (closer cubes matter more when healthy)
+                cr = 70.0 if hpf > 0.5 else 40.0
+                cbest, cd_ = None, cr
+                for _cid, cp_ in self.cb.items():
+                    dc_ = hypot(cp_[0] - x, cp_[1] - y)
+                    if dc_ < cd_:
+                        cbest, cd_ = cp_, dc_
+                if cbest is not None:
+                    goal, move, label = (cbest[0], cbest[1]), None, "fight:cube"
             if dodge is not None and tmin < P["dodge_t"]:
                 move = dodge
                 goal = None
