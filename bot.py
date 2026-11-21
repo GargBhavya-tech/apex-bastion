@@ -364,12 +364,34 @@ class Bot:
         return yaw, clamp(pitch, m["min_pitch"], m["max_pitch"])
 
     def choose_upgrade(self, offer, me):
-        best, bi = 999, 0
+        """Pick by value for what we hold; ids are validated against hello.config.upgrades."""
+        held = {w["kind"] for w in me["weapons"] if w}
+        defs = {u["id"]: u for u in self.cfg.get("upgrades", [])}
+        taken = {}
+        for u in me.get("upgrades", []):
+            taken[u] = taken.get(u, 0) + 1
+        base = {"armor": 10.0, "plating": 9.0, "nanites": 8.0, "gun_rate": 7.5, "gun_damage": 7.0, "gyros": 6.0,
+                "servos": 5.0, "gun_mag": 4.5, "gun_velocity": 3.5, "sensors": 4.0, "capacitor": 3.0, "reactor": 3.0, "jets": 2.0}
+        if "lightning" in held:
+            base.update(lightning_chain=7.8, lightning_efficiency=5.5, lightning_range=5.0)
+        if "laser" in held:
+            base.update(laser_damage=7.8, laser_charge=6.0, laser_pierce=3.0)
+        if "mortar" in held:
+            base.update(mortar_splash=4.0, mortar_reload=4.0, mortar_velocity=3.0)
+        best, bi = -1e9, 0
         for i, c in enumerate(offer["choices"]):
             cid = c["id"]
-            r = UPGRADE_PRIORITY.index(cid) if cid in UPGRADE_PRIORITY else 50
-            if r < best:
-                best, bi = r, i
+            d = defs.get(cid)
+            sc = base.get(cid, 1.0)
+            if d is not None:
+                req = d.get("requires")
+                if req and req not in held:
+                    sc -= 50
+                if taken.get(cid, 0) >= d.get("max", 99):
+                    sc -= 50
+            sc -= 1.5 * taken.get(cid, 0)
+            if sc > best:
+                best, bi = sc, i
         return bi
 
     def ingest(self, obs, me, t):
