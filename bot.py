@@ -250,7 +250,7 @@ UPGRADE_PRIORITY = [
     "gun_rate", "servos", "gun_mag", "laser_charge", "lightning_efficiency", "lightning_range",
     "capacitor", "reactor", "sensors", "jets", "gun_velocity",
 ]
-P = dict(want_l=22.0, want_g=40.0, want_lz=55.0, weak=0.35, amp=0.9, flip_lo=0.5, flip_hi=1.3, hold_hp=0.6, cube_r=30.0, cube_w=1.6, multi_n=99, multi_hp=0.7, adv_d=70.0, camp=0.5, dodge_t=0.9, strafe_keep=0.7)
+P = dict(want_l=22.0, want_g=40.0, want_lz=55.0, weak=0.35, amp=0.9, flip_lo=0.5, flip_hi=1.3, hold_hp=0.6, cube_r=30.0, cube_w=1.6, multi_n=99, multi_hp=0.7, adv_d=70.0, engage_r=999.0, dmg_window=6.0, farm_until=999.0, camp=0.5, dodge_t=0.9, strafe_keep=0.7)
 try:
     P.update(json.loads(os.environ.get("BOT_PARAMS", "{}")))
 except Exception:
@@ -616,12 +616,14 @@ class Bot:
             tz = p[2] + 4.5 * (1 + 0.05 * m.get("cubes", 0))
             vis = True if w is None else w.los(ex, ey, ez, p[0], p[1], tz)
             hpm = m.get("hp", 700) / max(1.0, m.get("max_hp", 1400))
+            if d > P["engage_r"] and t - self.last_dmg_t > P["dmg_window"]:
+                continue  # passive: ignore far enemies unless they are hurting us
             score = d * (0.6 + hpm) + (0 if vis else 60)
             if d > 230:
                 score += 200
             if score < best:
                 best, tgt, tgt_vis = score, m, vis
-        if tgt is None and hpf > 0.5:
+        if tgt is None and hpf > 0.5 and t < P["farm_until"]:
             for m in npcs:
                 p = m["pos"]
                 d = hypot(p[0] - x, p[1] - y)
@@ -905,7 +907,7 @@ class Bot:
                             else:
                                 goal = (p[0], p[1])
                                 label = "cube"
-                    if goal is None and move is None and hpf > 0.6 and t < 330:
+                    if goal is None and move is None and hpf > 0.6 and t < min(330, P["farm_until"]):
                         # crates: approach and shoot
                         cands = []
                         for i, p in self.cr.items():
