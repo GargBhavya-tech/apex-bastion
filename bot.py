@@ -250,14 +250,14 @@ UPGRADE_PRIORITY = [
     "gun_rate", "servos", "gun_mag", "laser_charge", "lightning_efficiency", "lightning_range",
     "capacitor", "reactor", "sensors", "jets", "gun_velocity",
 ]
-P = dict(want_l=22.0, want_g=40.0, want_lz=55.0, weak=0.35, amp=0.9, flip_lo=0.5, flip_hi=1.3, hold_hp=0.6, cube_r=30.0, cube_w=1.6, multi_n=99, multi_hp=0.7, adv_d=70.0, cover_camp=1, drop_r=120.0, drop_hp=0.6, late_pre=25.0, snd_avoid=1, avoid_s=3.0, tri=1, tri_far=58.0, laser_aim=1, engage_r=999.0, dmg_window=6.0, farm_until=999.0, camp=0.5, dodge_t=0.9, strafe_keep=0.7, v5=1, v5_open=0, loot_r=160.0, cube_roam=90.0)
+P = dict(want_l=22.0, want_g=40.0, want_lz=55.0, weak=0.35, amp=0.9, flip_lo=0.5, flip_hi=1.3, hold_hp=0.6, cube_r=30.0, cube_w=1.6, multi_n=99, multi_hp=0.7, adv_d=70.0, cover_camp=1, drop_r=120.0, drop_hp=0.6, late_pre=25.0, snd_avoid=1, avoid_s=3.0, tri=1, tri_far=58.0, laser_aim=1, engage_r=999.0, dmg_window=6.0, farm_until=999.0, camp=0.5, dodge_t=0.9, strafe_keep=0.7, v5=1, v5_open=0, v5_pos=0, v5_hide=0, open_s=40.0, camp_late=0.3, loot_r=160.0, cube_roam=90.0)
 try:
     _ENV = json.loads(os.environ.get("BOT_PARAMS", "{}"))
 except Exception:
     _ENV = {}
 P.update(_ENV)
 # v5 "hide and survive" defaults: applied unless BOT_PARAMS sets v5=0; anything set explicitly in BOT_PARAMS wins.
-V5 = dict(v5_open=1, loot_r=60.0, farm_until=0.0)
+V5 = dict(v5_open=1, loot_r=60.0, farm_until=0.0, v5_pos=1, v5_hide=1)
 if _ENV.get("v5", 1):
     for _k, _v in V5.items():
         if _k not in _ENV:
@@ -358,6 +358,9 @@ class Bot:
         return dx, dy
 
     def safe_zone(self, zone, t):
+        if P["v5_pos"] and t >= P["open_s"]:
+            # after the opening, always stand inside the NEXT circle (it lies wholly inside the current one)
+            return zone["next_center"], max(zone["next_radius"], 15.0)
         lead = 10 if zone["radius"] > 150 else P["late_pre"]
         if t >= zone["shrink_start"] - lead:
             return zone["next_center"], zone["next_radius"]
@@ -449,6 +452,8 @@ class Bot:
                 if self.alert is None or t - self.alert[1] > 1.0:
                     self.alert = (s["bearing"], t - s["age"])
                 self.snd_fight = (s["bearing"], t - s["age"], s["dist"])
+            elif k in ("gun", "laser", "lightning", "mortar", "explosion") and P["v5_hide"]:
+                self.snd_fight = (s["bearing"], t - s["age"], s["dist"])  # far combat noise: still walk away from it
             elif k in ("step", "boost", "jet") and s["dist"] == "near":
                 # a mech walking up on us: turn to face it (steps are only audible within 40 m)
                 if self.alert is None or t - self.alert[1] > 1.0:
@@ -673,7 +678,8 @@ class Bot:
         zc, zr = self.safe_zone(obs["zone"], t)
         dzc = hypot(x - zc[0], y - zc[1])
         outside = dzc > zr - 12 or not me["in_zone"]
-        camp = self.snap((zc[0] + P["camp"] * zr * math.cos(self.camp_ang), zc[1] + P["camp"] * zr * math.sin(self.camp_ang)))
+        cf = P["camp_late"] if (P["v5_pos"] and zr < 140) else P["camp"]
+        camp = self.snap((zc[0] + cf * zr * math.cos(self.camp_ang), zc[1] + cf * zr * math.sin(self.camp_ang)))
         if P["cover_camp"]:
             camp = self.sheltered(camp, zc, zr)
 
@@ -1100,7 +1106,11 @@ class Bot:
                 aim = [math.atan2(my, mx), 0.0]
             else:
                 self.sweep += 0.12
-                aim = [wrap(me["aim"][0] + 0.12), 0.0]
+                if P["v5_hide"]:
+                    base = math.atan2(zc[1] - y, zc[0] - x) if dzc > 15 else self.camp_ang
+                    aim = [wrap(base + 1.0 * math.sin(t * 0.6)), 0.0]
+                else:
+                    aim = [wrap(me["aim"][0] + 0.12), 0.0]
 
         act["move"] = [round(mx, 4), round(my, 4)]
         act["aim"] = [round(aim[0], 4), round(aim[1], 4)]
