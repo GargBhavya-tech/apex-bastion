@@ -259,7 +259,7 @@ WEAPON_SCORE = {"lightning": 3.0, "laser": 2.0, "mortar": 0.0, "gun": 1.0}
 
 
 class Bot:
-    name = "survivor-v2"
+    name = "survivor-v4"
 
     def __init__(self, hello):
         cfg = hello["config"]
@@ -274,6 +274,16 @@ class Bot:
             except Exception as e:  # map is an optimisation; play without it
                 mf.log("map load failed:", d, repr(e))
         self.camp_ang = self.rng.uniform(-PI, PI)
+        self.tel_on = os.environ.get("BOT_TELEMETRY", "1") == "1"
+        self.tel_dmg = []          # last 10 damaged events
+        self.tel_dt = []           # decision times (ms), capped
+        self.tel_wdmg = {}         # damage taken by weapon
+        self.tel_rear = 0.0
+        self.tel_last = None       # last obs summary
+        self.tel_beat = -99.0
+        self.last_label = ""
+        self.tel_maxvis = 0
+        self.tel_first_dmg = None
         self.pk = {}      # pickup id -> {kind,pos}
         self.cb = {}      # cube id -> pos
         self.cr = {}      # crate id -> pos
@@ -476,6 +486,63 @@ class Bot:
                 tgt = self.path[k]
         return tgt
 
+    # ------------------------------------------------------------------ telemetry (stderr only, size-capped)
+    def act(self, obs):
+        t0 = time.perf_counter()
+        try:
+            return self._act(obs)
+        finally:
+            dt = (time.perf_counter() - t0) * 1000.0
+            if self.tel_on:
+                try:
+                    self._tel(obs, dt)
+                except Exception:
+                    pass
+
+    def _tel(self, obs, dt):
+        if len(self.tel_dt) < 6000:
+            self.tel_dt.append(dt)
+        t = obs["t"]
+        me = obs["self"]
+        for e in obs["events"]:
+            if e.get("type") == "damaged":
+                rec = [round(t, 1), round(e["amount"]), e.get("weapon"), e.get("by"), 1 if e.get("rear") else 0,
+                       None if e.get("bearing") is None else round(e["bearing"], 2)]
+                self.tel_dmg.append(rec)
+                if len(self.tel_dmg) > 10:
+                    self.tel_dmg.pop(0)
+                w = e.get("weapon", "?")
+                self.tel_wdmg[w] = self.tel_wdmg.get(w, 0) + e["amount"]
+                if e.get("rear"):
+                    self.tel_rear += e["amount"]
+                if self.tel_first_dmg is None and w != "zone":
+                    self.tel_first_dmg = round(t, 1)
+        nvis = sum(1 for m in obs["mechs"] if m["kind"] == "mech")
+        self.tel_maxvis = max(self.tel_maxvis, nvis)
+        self.tel_last = dict(
+            t=round(t, 1), hp=round(me["hp"]), max_hp=round(me["max_hp"]), en=round(me["energy"]),
+            pos=[round(v) for v in me["pos"]], in_zone=me["in_zone"], cubes=me["cubes"], alive=obs["alive"],
+            loadout=[(w["kind"] if w else None) for w in me["weapons"]], vis=nvis, mode=self.last_label,
+            foes=[[m["id"], round(m["pos"][0] - me["pos"][0]), round(m["pos"][1] - me["pos"][1]), round(m.get("hp", 0)),
+                   m.get("weapons", [])] for m in obs["mechs"] if m["kind"] == "mech"][:4],
+        )
+        if t - self.tel_beat >= 15.0:
+            self.tel_beat = t
+            mf.log("TEL beat " + json.dumps(self.tel_last, separators=(",", ":"))[:400])
+
+    def on_end(self, msg):
+        if not self.tel_on:
+            return
+        d = sorted(self.tel_dt)
+        p99 = d[int(0.99 * (len(d) - 1))] if d else 0.0
+        last = self.tel_dmg[-1] if self.tel_dmg else None
+        rec = dict(place=msg.get("place"), kills=msg.get("kills"), death_t=(self.tel_last or {}).get("t"),
+                   killer=(last[3] if last else None), weapon=(last[2] if last else None), rear=(last[4] if last else None),
+                   state=self.tel_last, last_dmg=self.tel_dmg, dmg_by_weapon={k: round(v) for k, v in self.tel_wdmg.items()},
+                   rear_dmg=round(self.tel_rear), first_dmg_t=self.tel_first_dmg, max_vis=self.tel_maxvis,
+                   n_obs=len(d), p99_ms=round(p99, 2), max_ms=round(d[-1], 2) if d else 0.0, name=self.name)
+        mf.log("TEL end " + json.dumps(rec, separators=(",", ":"))[:3000])
+
     def find_cover(self, x, y, z, threats, zc, zr):
         w = self.world
         if w is None or not threats:
@@ -504,7 +571,7 @@ class Bot:
         return bp
 
     # ------------------------------------------------------------------ main
-    def act(self, obs):
+    def _act(self, obs):
         T0 = time.perf_counter()
         me = obs["self"]
         x, y, z = me["pos"]
@@ -934,6 +1001,7 @@ class Bot:
         # prune bad
         if tick % 100 == 0:
             self.bad = {k: v for k, v in self.bad.items() if v > t}
+        self.last_label = label
         mf.draw.label(f"{label} hp{me['hp']:.0f}")
         return act
 

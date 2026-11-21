@@ -502,6 +502,17 @@ def _reader(q: "queue.Queue[Optional[str]]") -> None:
     q.put(None)
 
 
+def _finish(bot: Any, msg: Dict[str, Any]) -> None:
+    """Tell the bot the match ended (place/kills), so it can log. Never raises."""
+    hook = getattr(bot, "on_end", None)
+    if hook is None:
+        return
+    try:
+        hook(msg)
+    except Exception:
+        log(traceback.format_exc())
+
+
 def run(make_bot: Any) -> None:
     """Run a bot until the match ends. `make_bot(hello)` returns an object with `act(obs) -> Action`
     and optionally `name`. A class works: `run(MyBot)`."""
@@ -537,6 +548,7 @@ def run(make_bot: Any) -> None:
             elif kind == "obs":
                 latest = msg
             elif kind == "end":
+                _finish(bot, msg)
                 return
         if latest is None:
             continue
