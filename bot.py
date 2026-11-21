@@ -4,6 +4,7 @@ import math
 import os
 import random
 import sys
+import threading
 import time
 from array import array
 
@@ -96,22 +97,20 @@ class World:
         self.gh = int((self.by1 - self.by0 - 6) / cs)
         blk = bytearray(self.gw * self.gh)
         bh, g = self.bh, self.g
-        off = (0.0, cs * 0.5, cs * 0.999)
+        pts = ((0.5, 0.5), (0.2, 0.2), (0.8, 0.2), (0.2, 0.8), (0.8, 0.8))
         for j in range(self.gh):
             y0 = self.gy0 + j * cs
             for i in range(self.gw):
                 x0 = self.gx0 + i * cs
-                zc = g[self.idx(x0 + cs * 0.5, y0 + cs * 0.5)] * 0.01
-                b = 0
-                for ox in off:
-                    for oy in off:
-                        k = self.idx(x0 + ox, y0 + oy)
-                        if bh[k] > g[k] * 0.01 + 1.3:
-                            b = 1
-                            break
-                    if b:
-                        break
-                blk[j * self.gw + i] = b
+                nb = 0
+                cen = 0
+                for q, (fx, fy) in enumerate(pts):
+                    k = self.idx(x0 + fx * cs, y0 + fy * cs)
+                    if bh[k] > g[k] * 0.01 + 1.3:
+                        nb += 1
+                        if q == 0:
+                            cen = 1
+                blk[j * self.gw + i] = 1 if (cen or nb >= 2) else 0
         self.blk = blk
 
     def cell(self, x, y):
@@ -132,7 +131,7 @@ class World:
                         return a, b
         return i, j
 
-    def plan(self, sx, sy, gx, gy, max_nodes=2500):
+    def plan(self, sx, sy, gx, gy, max_nodes=60000):
         import heapq
         gw, gh, blk, cs = self.gw, self.gh, self.blk, self.cs
         si, sj = self.nearest_open(*self.cell(sx, sy))
@@ -143,7 +142,7 @@ class World:
         gd = self.g
         dist = {start: 0.0}
         prev = {}
-        W_ = 1.8
+        W_ = 1.5
         h0 = max(abs(si - ti), abs(sj - tj)) + 0.414 * min(abs(si - ti), abs(sj - tj))
         pq = [(h0 * W_, start)]
         closed = set()
@@ -251,11 +250,16 @@ UPGRADE_PRIORITY = [
     "gun_rate", "servos", "gun_mag", "laser_charge", "lightning_efficiency", "lightning_range",
     "capacitor", "reactor", "sensors", "jets", "gun_velocity",
 ]
+P = dict(want_l=22.0, want_g=40.0, want_lz=55.0, weak=0.35, amp=0.9, flip_lo=0.5, flip_hi=1.3, hold_hp=0.6, cube_r=30.0, cube_w=1.6, multi_n=99, multi_hp=0.7, adv_d=70.0, camp=0.5, dodge_t=0.9, strafe_keep=0.7)
+try:
+    P.update(json.loads(os.environ.get("BOT_PARAMS", "{}")))
+except Exception:
+    pass
 WEAPON_SCORE = {"lightning": 3.0, "laser": 2.0, "mortar": 0.0, "gun": 1.0}
 
 
 class Bot:
-    name = "survivor-v1"
+    name = "survivor-v2"
 
     def __init__(self, hello):
         cfg = hello["config"]
@@ -289,6 +293,9 @@ class Bot:
         self.goal_since = {}
         self.upg_taken = {}
         self.path = None
+        self.plan_res = None
+        self.planning = False
+        self.sync_plan = False
         self.path_goal = (0.0, 0.0)
         self.path_t = -99.0
 
@@ -399,6 +406,14 @@ class Bot:
     def blocked_id(self, i, t):
         return self.bad.get(i, -1) > t
 
+    def nearest_cube(self, x, y, r):
+        best, bp = r, None
+        for p in self.cb.values():
+            d = hypot(p[0] - x, p[1] - y)
+            if d < best:
+                best, bp = d, p
+        return bp
+
     def snap(self, p):
         w = self.world
         if w is None or getattr(w, "blk", None) is None:
@@ -418,6 +433,9 @@ class Bot:
         if gd < 45 and w.line_free(x, y, goal[0], goal[1], z):
             self.path = None
             return goal
+        if self.plan_res is not None:
+            self.path, self.path_goal, self.path_t = self.plan_res
+            self.plan_res = None
         need = (
             self.path is None
             or hypot(self.path_goal[0] - goal[0], self.path_goal[1] - goal[1]) > 8
@@ -425,10 +443,25 @@ class Bot:
             or (len(self.path) <= 1 and gd > 15)
             or t < self.escape_until
         )
-        if need and time.perf_counter() - T0 < 0.025:
-            self.path = w.plan(x, y, goal[0], goal[1])
-            self.path_goal = goal
-            self.path_t = t
+        if need and not self.planning:
+            self.planning = True
+            sx, sy = x, y
+
+            def job():
+                try:
+                    res = w.plan(sx, sy, goal[0], goal[1])
+                    self.plan_res = (res, goal, t)
+                except Exception:
+                    self.plan_res = (None, goal, t)
+                finally:
+                    self.planning = False
+
+            if self.sync_plan:
+                job()
+                self.path, self.path_goal, self.path_t = self.plan_res
+                self.plan_res = None
+            else:
+                threading.Thread(target=job, daemon=True).start()
         if not self.path:
             return goal
         # drop passed waypoints; pick the farthest visible one within 30 m
@@ -496,7 +529,7 @@ class Bot:
         zc, zr = self.safe_zone(obs["zone"], t)
         dzc = hypot(x - zc[0], y - zc[1])
         outside = dzc > zr - 12 or not me["in_zone"]
-        camp = self.snap((zc[0] + 0.5 * zr * math.cos(self.camp_ang), zc[1] + 0.5 * zr * math.sin(self.camp_ang)))
+        camp = self.snap((zc[0] + P["camp"] * zr * math.cos(self.camp_ang), zc[1] + P["camp"] * zr * math.sin(self.camp_ang)))
 
         def in_safe(px, py, margin=10.0):
             return hypot(px - zc[0], py - zc[1]) < zr - margin
@@ -629,12 +662,14 @@ class Bot:
             has_lightning = "lightning" in kinds
             has_laser = "laser" in kinds
             if has_lightning and energy > 12:
-                want = 22.0
+                want = P["want_l"]
             elif has_laser:
-                want = 55.0
+                want = P["want_lz"]
             else:
-                want = 40.0
-            weak = tgt_is_enemy and hpf < 0.35 and (len(enemies) >= 2 or tgt.get("hp", 700) / max(1, tgt.get("max_hp", 1400)) > hpf)
+                want = P["want_g"]
+            n_close = sum(1 for m_ in enemies if hypot(m_["pos"][0] - x, m_["pos"][1] - y) < 70)
+            outnumbered = tgt_is_enemy and n_close >= P["multi_n"] and hpf < P["multi_hp"]
+            weak = outnumbered or tgt_is_enemy and hpf < P["weak"] and (len(enemies) >= 2 or tgt.get("hp", 700) / max(1, tgt.get("max_hp", 1400)) > hpf)
             tol = max(0.025, 0.7 * math.atan2(2.5, max(d, 5.0)))
             slew_y = stats.get("turn_rate", 4.0) * 0.05 * 0.9
             slew_p = stats.get("pitch_rate", 3.0) * 0.05 * 0.9
@@ -681,25 +716,35 @@ class Bot:
                     move = (0.0, 0.0)
                     label = "hide"
             elif not tgt_vis:
-                if tgt_is_enemy and hpf > 0.6 and d < 70 and in_safe(tp[0], tp[1], 0):
+                if tgt_is_enemy and hpf > P["hold_hp"] and d < P["adv_d"] and in_safe(tp[0], tp[1], 0):
                     goal = (tp[0], tp[1])
                     label = "advance"
                 else:
-                    move = (0.0, 0.0)
-                    label = "ambush"
+                    cn = self.nearest_cube(x, y, 45.0)
+                    if cn is not None and hpf > 0.3:
+                        goal = (cn[0], cn[1])
+                        label = "cube!"
+                    else:
+                        move = (0.0, 0.0)
+                        label = "ambush"
             else:
                 label = "fight"
                 if t >= self.sflip:
-                    self.ssign = -self.ssign if self.rng.random() < 0.7 else self.ssign
-                    self.sflip = t + self.rng.uniform(0.5, 1.3)
+                    self.ssign = -self.ssign if self.rng.random() < P["strafe_keep"] else self.ssign
+                    self.sflip = t + self.rng.uniform(P["flip_lo"], P["flip_hi"])
                 rx, ry = (tp[0] - x) / (d or 1), (tp[1] - y) / (d or 1)
                 radial = clamp((d - want) / 15.0, -1.0, 1.0)
                 if not tgt_is_enemy:
                     radial = clamp((d - 25) / 10.0, -1.0, 1.0)
-                mx = radial * rx + 0.9 * self.ssign * (-ry)
-                my = radial * ry + 0.9 * self.ssign * rx
+                mx = radial * rx + P["amp"] * self.ssign * (-ry)
+                my = radial * ry + P["amp"] * self.ssign * rx
                 move = (mx, my)
-            if dodge is not None and tmin < 0.9:
+                cn = self.nearest_cube(x, y, P["cube_r"])
+                if cn is not None:
+                    cdx, cdy = cn[0] - x, cn[1] - y
+                    cdn = hypot(cdx, cdy) or 1.0
+                    move = (mx + P["cube_w"] * cdx / cdn, my + P["cube_w"] * cdy / cdn)
+            if dodge is not None and tmin < P["dodge_t"]:
                 move = dodge
                 goal = None
                 boost = boost
@@ -775,7 +820,7 @@ class Bot:
                             else:
                                 goal = (pp[0], pp[1])
                                 label = "loot"
-                    if goal is None and move is None and hpf > 0.5:
+                    if goal is None and move is None and hpf > 0.3:
                         # cubes
                         cands = []
                         for i, p in self.cb.items():
