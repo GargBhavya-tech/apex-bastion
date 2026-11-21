@@ -815,7 +815,7 @@ class Bot:
                 move = dodge
                 goal = None
                 boost = boost
-            if outside and tgt_is_enemy:
+            if outside:
                 goal = zc
                 move = None
                 boost = not me["in_zone"] and energy > 5
