@@ -12,9 +12,9 @@ const (
 	// tweakDropV: squad mode only, weight of uncontested supply drops in the calm loot choice (0 = never, as the base; 1 = 3 cubes + missing HP).
 	tweakDropV = 0.0
 	// tweakFightDropR: squad mode only, radius (m) within which a landed, uncontested supply drop is captured mid-fight (0 = never).
-	tweakFightDropR = 0.0
+	tweakFightDropR = 40.0
 	// tweakNano: squad mode only, repair nanites right after plating in the upgrade order (false = original laser order).
-	tweakNano = false
+	tweakNano = true
 
 	// Squad (practice) parameters, applied by squadParams only.
 	// tweakFinish: range (m) we close to on a weak foe (Params.Finish, 14 = original).
@@ -49,7 +49,7 @@ const (
 	// tweakJinkBoost: boost the fight strafe when a target is visible and energy > 40.
 	tweakJinkBoost = false
 	// tweakDodgeBoost: boost on every bullet or laser dodge when energy > 25 (original: laser dodges only).
-	tweakDodgeBoost = false
+	tweakDodgeBoost = true
 	// tweakThreatBoost: boost whenever moving under threat (a target, or hit in the last 2 s) with energy > 30.
 	tweakThreatBoost = false
 	// tweakMobUp: upgrade order plating, armor, servos, jets, reactor, then the laser order.
@@ -60,7 +60,7 @@ const (
 	tweakChargeBoost = false
 	// tweakBoostHyst: the extra boosts above stop when energy falls under 30 and resume over 60; with lightning held,
 	// the strafe and threat boosts also keep energy over 60 for its shots.
-	tweakBoostHyst = false
+	tweakBoostHyst = true
 	// Squad targeting (0 = original): tweakHPw weight of foe HP in target choice (0.2), tweakLowBonus bonus for a foe under
 	// 30 % HP (100), tweakLethalK share of the partial-laser damage that must cover the foe's HP to release early (0.8).
 	tweakHPw      = 0.0
