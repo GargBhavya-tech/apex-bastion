@@ -78,7 +78,7 @@ func main() {
 					w = core.FlatTerrain()
 				}
 				brain = core.NewMind(&h, w)
-				send(map[string]string{"type": "ready", "name": "soloing-v20h"})
+				send(map[string]string{"type": "ready", "name": "soloing-v19"})
 			case "obs":
 				latest = raw
 			case "end":
