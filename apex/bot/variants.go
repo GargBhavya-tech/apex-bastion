@@ -1180,8 +1180,6 @@ var huntSweep = map[string]func(p *Params){
 	"fE": func(p *Params) {
 		p.KeepAway, p.KeepAwayMem, p.KeepAwayStay = 800, 20, 20
 		p.HouseModel = true
-		p.HuntRangeLaser = 260
-		p.FinishFrac, p.FinishRange, p.FinishStick = 0.3, 120, 2
 	},
 	"fF": func(p *Params) {
 		p.KeepAway, p.KeepAwayMem, p.KeepAwayStay = 800, 20, 20
