@@ -72,20 +72,20 @@ const (
 	// the match, exactly as a house bot dying without us already does (0 = original: only such a death switches).
 	// Keeping squad mode after such late deaths (tweakFFAUntil 60) cost about 0.35, so the cautious mode is used late
 	// even in matches where no house bot has died. 265 s is when the base brain's own "late" starts (next zone radius 70 m).
-	tweakCautiousT = 0.0
+	tweakCautiousT = 265.0
 	// tweakFinalHold: in the last shrink (radius 25 -> 0 m, 390-415 s, 260 HP/s outside), stay within a tolerance of
 	// its end point that shrinks with the circle (original: anywhere within 2 m once the zone deadline is near).
 	// The end point is the only spot inside until 415 s; each metre off it in the outward direction is up to
 	// 25/(25-L) s earlier outside (L = distance the centre still moves), i.e. several hundred HP, and survivors are
 	// then ranked by the order the zone kills them. It holds only in matches confirmed as practice (squad mode on
 	// after 60 s; in free-for-all a death we did not cause always ends squad mode before about 37 s).
-	tweakFinalHold = false
+	tweakFinalHold = true
 	// tweakLeadK: squad mode only, gun lead on mechs. A gun shot leaves on the first tick after the decision when
 	// the cooldown is at most one tick (else on the second) and covers its first 3 m at once, so the bullet reaches
 	// a target d m away (d-3)/speed s after leaving (original: always 0.075 s more). Fighting house bots
 	// strafe and turn back, so they cover only part of v*T: the predicted travel is scaled by this factor
 	// (0 = original lead; in 123 recorded matches 0.8 best centres bullets on them 0.3-0.6 s ahead).
-	tweakLeadK = 0.0
+	tweakLeadK = 0.8
 	// tweakLaserSlew: squad mode only. The torso turns before the beam leaves on the first tick after the release,
 	// so the release and lethal checks allow one tick of turn; the beam leads its target by that tick
 	// (original: 0.125 s); while charging, the aim stays on the gun lead (original: the laser line from 45 % charge
