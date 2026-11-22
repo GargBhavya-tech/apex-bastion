@@ -1177,7 +1177,12 @@ var huntSweep = map[string]func(p *Params){
 	"fB": func(p *Params) { fort(p); p.Hunt = false; p.NoFarm = true },
 	"fC": func(p *Params) { fort(p); p.Hunt = false; stand(p) },
 	"fD": func(p *Params) { fort(p); p.HuntRange, p.HuntRangeLaser = 70, 90 },
-	"fE": func(p *Params) { p.KeepAway, p.KeepAwayMem, p.KeepAwayStay = 800, 20, 20 },
+	"fE": func(p *Params) {
+		p.KeepAway, p.KeepAwayMem, p.KeepAwayStay = 800, 20, 20
+		p.HouseModel = true
+		p.HuntRangeLaser = 260
+		p.FinishFrac, p.FinishRange, p.FinishStick = 0.3, 120, 2
+	},
 	"fF": func(p *Params) {
 		p.KeepAway, p.KeepAwayMem, p.KeepAwayStay = 800, 20, 20
 		p.HealFirst, p.HealUntil = 0.8, 0.97
@@ -1196,14 +1201,6 @@ func init() {
 	huntSweep["lE"] = func(p *Params) { p.LightningValue, p.ArmSwapMin = 9, 0.2 }
 	huntSweep["lF"] = func(p *Params) { p.LaserValue = 0.5 }
 	// laser hunger (see chooseLoot): farther for a laser, crates for a laser, both, more of both
-	// 10:36: the two hunt changes with an official or emulated plus, together: never retreat from the
-	// squad (it follows anyway) and finish the wounded target first
-	huntSweep["sF"] = func(p *Params) {
-		stand(p)
-		p.FinishFrac, p.FinishRange, p.FinishMinHP, p.FinishStick = 0.3, 120, 0.25, 3
-	}
-	// (Tried and removed with its code, 09:17: the laser from behind cover against the squad, peek.go
-	// with the squad stance allowed: 5.65, 5.63, 5.51 against 5.78.)
 	// (Tried and removed with their code, 09:10: going farther for a laser and breaking crates for one
 	// changed nothing, 5.56-5.60 against 5.57; a laser and lightning with the gun dropped lost 0.3.
 	// Emulated practice by what we hold 30 s in: gun + laser 6.0 kills, gun + lightning 5.3, gun 4.3.)
