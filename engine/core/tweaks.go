@@ -28,7 +28,7 @@ const (
 	// tweakStick: target score bonus for keeping the current target (Params.Stick, 120 = original).
 	tweakStick = 120.0
 	// tweakHear: squad mode only, look toward enemy sounds no visible mech explains and side-step unseen laser charges (false = original).
-	tweakHear = false
+	tweakHear = true
 	// tweakNpcGoneHP: a drone that vanishes from the observation below this HP fraction is dead and forgotten (0 = original: chased and shot for up to 12 s).
 	tweakNpcGoneHP = 0.3
 	// tweakCubeLevel: in-fight cube detours skip cubes on roofs or decks above our level, which cannot be picked up (false = original).
