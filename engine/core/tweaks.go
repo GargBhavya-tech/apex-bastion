@@ -39,7 +39,7 @@ const (
 	tweakNpcTie = false
 	// tweakRear: squad mode only, target score bonus for a foe showing us its back (rear armor takes rear_mult damage),
 	// and the rear multiplier counted in the lethal laser release (0 = original).
-	tweakRear = 0.0
+	tweakRear = 60.0
 	// tweakFFAUntil: a death we did not cause switches to free-for-all play only if first seen before this time (s).
 	// In 77 recorded free-for-all matches the first such death always came before 37 s, for every mech, so those
 	// matches play exactly as before; in practice a late zone or drone death no longer drops the squad settings.
@@ -90,7 +90,7 @@ const (
 	// so the release and lethal checks allow one tick of turn; the beam leads its target by that tick
 	// (original: 0.125 s); while charging, the aim stays on the gun lead (original: the laser line from 45 % charge
 	// on), and gun shots whose bullet would follow the laser line off the gun lead are held.
-	tweakLaserSlew = false
+	tweakLaserSlew = true
 
 	// Free-for-all (outside squad mode).
 	// tweakFFASeek: in the first tweakFFASeekT seconds, without a laser or lightning, fetch one up to this distance (m)
